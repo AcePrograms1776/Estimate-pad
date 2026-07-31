@@ -285,17 +285,17 @@
     </div>
 
     <div class="actions">
-      <button onclick="printEstimate()" id="printBtn">Print</button>
+      <button onclick="printEstimate()" id="printBtn" data-label="Print">Print</button>
       <button onclick="saveEstimate()" id="saveBtn">Save</button>
-      <button onclick="emailEstimate()" id="emailBtn">Email</button>
+      <button onclick="emailEstimate()" id="emailBtn" data-label="Email">Email</button>
     </div>
     <button class="history-toggle" onclick="toggleHistory()" id="historyToggle">View past estimates</button>
     <div class="history-panel" id="historyPanel">
       <ul id="historyList" style="list-style:none; margin:0; padding:0;"></ul>
       <div class="backup-row">
-        <button class="backup-btn" onclick="backupEstimates()">Back up all</button>
+        <button class="backup-btn" onclick="backupEstimates()" id="backupBtn" data-label="Back up all">Back up all</button>
         <button class="backup-btn" onclick="document.getElementById('restoreFile').click()">Restore</button>
-        <input type="file" id="restoreFile" accept=".json,application/json"
+        <input type="file" id="restoreFile"
                style="display:none" onchange="restoreEstimates(this)">
       </div>
     </div>
@@ -576,83 +576,158 @@
       }
     }
 
+    // =========================================================================
+    // SHARING (Print / Email / Back up)
+    //
+    // iPhones only allow the share sheet to open as a DIRECT result of a tap.
+    // Building the PDF takes a few seconds, so by the time it was ready the
+    // phone had already stopped listening — which is why nothing happened.
+    //
+    // So sharing is now two taps: the first builds the file, the second sends
+    // it. The second tap is what actually opens the share sheet.
+    // =========================================================================
+
+    var pendingFile = null;
+    var pendingBtnId = null;
+
+    function resetPending() {
+      if (pendingBtnId) {
+        var b = document.getElementById(pendingBtnId);
+        if (b) { b.textContent = b.getAttribute('data-label'); }
+      }
+      pendingFile = null;
+      pendingBtnId = null;
+    }
+
+    function downloadFile(file) {
+      var url = URL.createObjectURL(file);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = file.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+    }
+
+    async function shareFlow(btnId, buildFile, readyLabel, shareTitle) {
+      var btn = document.getElementById(btnId);
+
+      // ---- SECOND TAP: send immediately, while the tap is still "live" ----
+      if (pendingFile && pendingBtnId === btnId) {
+        var file = pendingFile;
+        resetPending();
+        try {
+          await navigator.share({ files: [file], title: shareTitle });
+        } catch (err) {
+          if (err && err.name !== 'AbortError') {
+            downloadFile(file);
+            alert('The share sheet would not open, so the file was saved to your downloads instead.');
+          }
+        }
+        return;
+      }
+
+      // ---- FIRST TAP: build the file ----
+      resetPending();
+      btn.textContent = 'Preparing…';
+
+      try {
+        var built = await buildFile();
+
+        if (navigator.canShare && navigator.canShare({ files: [built] })) {
+          pendingFile = built;
+          pendingBtnId = btnId;
+          btn.textContent = readyLabel;
+        } else {
+          downloadFile(built);
+          btn.textContent = btn.getAttribute('data-label');
+        }
+      } catch (err) {
+        btn.textContent = btn.getAttribute('data-label');
+        alert('Could not create the file: ' + (err && err.message ? err.message : 'unknown error'));
+      }
+    }
+
     function estimateFileName() {
       var namePart = (document.getElementById('custName').value || 'estimate')
         .trim().replace(/\s+/g, '_');
       return namePart + '.pdf';
     }
 
-    // PRINT — goes through a PDF instead of printing the web page directly.
-    // Printing a web page makes the browser stamp its own date/URL/page number
-    // on your paper. Printing a PDF does not.
-    async function printEstimate() {
-      var btn = document.getElementById('printBtn');
-      var originalLabel = btn.textContent;
-
+    async function buildEstimateFile() {
       if (!window.html2canvas || !window.jspdf) {
-        // No internet for the PDF tools — fall back to plain printing.
-        fillPrintView();
-        window.print();
-        return;
+        throw new Error('the PDF tools did not load — check your internet connection');
       }
-
-      btn.textContent = 'Preparing…';
-
-      try {
-        var pdfBlob = await buildPdfBlob();
-        var fileName = estimateFileName();
-        var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          // On iPhone/iPad this opens the share sheet — tap Print there.
-          await navigator.share({ files: [file], title: 'Estimate' });
-        } else {
-          // On a computer this opens the PDF in its own tab — print from there.
-          var url = URL.createObjectURL(pdfBlob);
-          window.open(url, '_blank');
-        }
-      } catch (err) {
-        if (err && err.name !== 'AbortError') {
-          alert('Something went wrong creating the PDF. Please try again.');
-        }
-      } finally {
-        btn.textContent = originalLabel;
-      }
+      var blob = await buildPdfBlob();
+      return new File([blob], estimateFileName(), { type: 'application/pdf' });
     }
 
-    async function emailEstimate() {
-      var btn = document.getElementById('emailBtn');
-      var originalLabel = btn.textContent;
+    function printEstimate() {
+      shareFlow('printBtn', buildEstimateFile, 'Tap again to print \u25B8', 'Estimate');
+    }
 
-      if (!window.html2canvas || !window.jspdf) {
-        alert('The PDF tools did not load — check your internet connection and try again.');
-        return;
+    function emailEstimate() {
+      shareFlow('emailBtn', buildEstimateFile, 'Tap again to send \u25B8', 'Estimate');
+    }
+
+    // Backup is saved as a .txt file on purpose: iPhones refuse to share
+    // .json files, so a .json backup silently went nowhere.
+    async function buildBackupFile() {
+      var history = loadHistory();
+      if (history.length === 0) {
+        throw new Error('there are no saved estimates to back up yet');
       }
+      var stamp = new Date().toISOString().slice(0, 10);
+      var blob = new Blob([JSON.stringify(history, null, 2)], { type: 'text/plain' });
+      return new File([blob], 'estimate-backup-' + stamp + '.txt', { type: 'text/plain' });
+    }
 
-      btn.textContent = 'Preparing…';
+    function backupEstimates() {
+      shareFlow('backupBtn', buildBackupFile, 'Tap again to save \u25B8', 'Estimate Backup');
+    }
 
-      try {
-        var pdfBlob = await buildPdfBlob();
-        var fileName = estimateFileName();
-        var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+    // ---- Restore: read a backup file back in, keeping anything already here ----
+    function restoreEstimates(input) {
+      var file = input.files && input.files[0];
+      if (!file) { return; }
 
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: 'Estimate' });
-        } else {
-          var url = URL.createObjectURL(pdfBlob);
-          var a = document.createElement('a');
-          a.href = url;
-          a.download = fileName;
-          a.click();
-          alert('Direct sharing is not available here — the PDF downloaded instead so you can attach it manually.');
+      var reader = new FileReader();
+
+      reader.onerror = function () {
+        alert('That file could not be opened.');
+        input.value = '';
+      };
+
+      reader.onload = function () {
+        try {
+          var incoming = JSON.parse(reader.result);
+          if (!Array.isArray(incoming)) { throw new Error('not a backup file'); }
+
+          var existing = loadHistory();
+          var seen = {};
+          existing.forEach(function (e) { seen[e.id] = true; });
+
+          var added = 0;
+          incoming.forEach(function (e) {
+            if (e && e.id && !seen[e.id]) {
+              existing.push(e);
+              seen[e.id] = true;
+              added++;
+            }
+          });
+
+          existing.sort(function (a, b) { return b.id - a.id; });
+          saveHistoryArray(existing);
+          renderHistory();
+          alert('Restored ' + added + ' estimate(s).');
+        } catch (e) {
+          alert('That file is not an estimate backup.');
         }
-      } catch (err) {
-        if (err && err.name !== 'AbortError') {
-          alert('Something went wrong creating the PDF. Please try again.');
-        }
-      } finally {
-        btn.textContent = originalLabel;
-      }
+        input.value = '';
+      };
+
+      reader.readAsText(file);
     }
 
     function loadHistory() {
@@ -774,72 +849,6 @@
       document.getElementById('historyPanel').classList.toggle('open');
     }
 
-    // ---- Backup: save every stored estimate out to a file you keep ----
-    async function backupEstimates() {
-      var history = loadHistory();
-      if (history.length === 0) {
-        alert('There are no saved estimates to back up yet.');
-        return;
-      }
-
-      var stamp = new Date().toISOString().slice(0, 10);
-      var fileName = 'estimate-backup-' + stamp + '.json';
-      var blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
-      var file = new File([blob], fileName, { type: 'application/json' });
-
-      try {
-        if (navigator.canShare && navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: 'Estimate Backup' });
-        } else {
-          var url = URL.createObjectURL(blob);
-          var a = document.createElement('a');
-          a.href = url;
-          a.download = fileName;
-          a.click();
-        }
-      } catch (err) {
-        if (err && err.name !== 'AbortError') {
-          alert('Could not create the backup file.');
-        }
-      }
-    }
-
-    // ---- Restore: read a backup file back in, keeping anything already here ----
-    function restoreEstimates(input) {
-      var file = input.files && input.files[0];
-      if (!file) { return; }
-
-      var reader = new FileReader();
-      reader.onload = function () {
-        try {
-          var incoming = JSON.parse(reader.result);
-          if (!Array.isArray(incoming)) { throw new Error('bad format'); }
-
-          var existing = loadHistory();
-          var seen = {};
-          existing.forEach(function (e) { seen[e.id] = true; });
-
-          var added = 0;
-          incoming.forEach(function (e) {
-            if (e && e.id && !seen[e.id]) {
-              existing.push(e);
-              seen[e.id] = true;
-              added++;
-            }
-          });
-
-          existing.sort(function (a, b) { return b.id - a.id; });
-          saveHistoryArray(existing);
-          renderHistory();
-          alert('Restored ' + added + ' estimate(s).');
-        } catch (e) {
-          alert('That file could not be read as a backup.');
-        }
-        input.value = '';
-      };
-      reader.readAsText(file);
-    }
-
     // ---- Wire everything up ----
     var elName = document.getElementById('custName');
     var elEmail = document.getElementById('custEmail');
@@ -859,6 +868,15 @@
     onFinish(elStreet, function (t) { return forceCaps(capitalizeWords(t)); });
     onFinish(elPhone, formatPhone);
     onFinish(elCityStateZip, formatCityStateZip);
+
+    // If anything is edited after a file was prepared, throw it away so a
+    // stale copy can never be sent.
+    ['custName', 'custEmail', 'custStreet', 'custPhone', 'custCityStateZip',
+     'estimateText', 'fontChoice', 'sizeChoice'].forEach(function (id) {
+      document.getElementById(id).addEventListener('input', function () {
+        if (pendingFile) { resetPending(); }
+      });
+    });
 
     renderHistory();
     updateEstimateStyle();
