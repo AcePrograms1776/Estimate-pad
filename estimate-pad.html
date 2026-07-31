@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Estimate Pad</title>
+<style>
+  :root {
+    --navy: #1b2a4a;
+    --paper: #fdfdfb;
+    --ink: #1b1b1b;
+    --accent: #f2b134;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--navy);
+    color: var(--ink);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 48px;
+  }
+  h1 {
+    color: #fff;
+    font-size: 1.3rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin: 0 0 16px;
+  }
+  .sheet {
+    width: 100%;
+    max-width: 640px;
+    background: var(--paper);
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+    padding: 18px;
+  }
+
+  /* Letterhead: customer name/email row, street/phone row, city-state-zip row */
+  .header-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .header-grid.single { grid-template-columns: 1fr; }
+  .field-input {
+    border: 1px solid #d8d8d2;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 1rem;
+    font-family: inherit;
+    color: var(--ink);
+    width: 100%;
+  }
+  .field-input:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .header-gap { height: 14px; }
+
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .toolbar label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.75rem;
+    color: #555;
+  }
+  .toolbar .font-field { flex: 2; }
+  .toolbar .size-field { flex: 1; }
+  .toolbar select,
+  .toolbar input[type="number"] {
+    padding: 8px;
+    font-size: 0.95rem;
+    border: 1px solid #d8d8d2;
+    border-radius: 6px;
+    background: #fff;
+    color: var(--ink);
+    width: 100%;
+  }
+
+  textarea {
+    width: 100%;
+    min-height: 45vh;
+    border: 1px solid #d8d8d2;
+    border-radius: 6px;
+    padding: 14px;
+    font-size: 1rem;
+    line-height: 1.5;
+    font-family: inherit;
+    color: var(--ink);
+    resize: vertical;
+  }
+  textarea:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+  }
+  button {
+    flex: 1;
+    padding: 13px;
+    font-size: 1rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 6px;
+    background: var(--accent);
+    color: #1b1b1b;
+    cursor: pointer;
+  }
+  button:active { transform: translateY(1px); }
+
+  .history-toggle {
+    width: 100%;
+    background: none;
+    border: none;
+    color: var(--navy);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-decoration: underline;
+    padding: 12px 0 0;
+    cursor: pointer;
+  }
+  .history-panel {
+    display: none;
+    margin-top: 8px;
+    border-top: 1px solid #eee;
+    padding-top: 6px;
+    max-height: 240px;
+    overflow-y: auto;
+  }
+  .history-panel.open { display: block; }
+  .history-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0ee;
+  }
+  .history-item .load-btn {
+    flex: 1;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 2px 0;
+    font-size: 0.85rem;
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .history-item .load-btn .when {
+    display: block;
+    font-size: 0.72rem;
+    color: #888;
+    margin-bottom: 2px;
+  }
+  .history-item .delete-btn {
+    background: none;
+    border: none;
+    color: #b23b3b;
+    font-size: 0.85rem;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .history-empty {
+    color: #888;
+    font-size: 0.85rem;
+    padding: 8px 0;
+  }
+
+  /* Everything below is invisible on screen; it only shows up when printing. */
+  #printView { display: none; }
+  .print-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 6px;
+  }
+  .print-row.single { grid-template-columns: 1fr; }
+  .print-cell { white-space: pre-wrap; }
+  .print-gap { height: 1.6em; }
+  #pv-job { white-space: pre-wrap; margin: 0; font-family: inherit; }
+
+  @media print {
+    body { background: #fff; padding: 0; }
+    h1, .toolbar, .actions, .history-toggle, .history-panel,
+    .header-grid, .header-gap { display: none; }
+    .sheet { box-shadow: none; padding: 0; max-width: 100%; background: #fff; }
+    #printView { display: block; position: relative; min-height: 90vh; }
+    .print-footer { position: fixed; bottom: 0; left: 0; font-size: 10pt; color: #444; }
+  }
+</style>
+</head>
+<body>
+  <h1>Estimate Pad</h1>
+  <div class="sheet">
+
+    <!-- Letterhead: name/email, then street/phone, then city-state-zip -->
+    <div class="header-grid">
+      <input type="text" id="custName" class="field-input" placeholder="Customer name">
+      <input type="email" id="custEmail" class="field-input" placeholder="Email address">
+    </div>
+    <div class="header-grid">
+      <input type="text" id="custStreet" class="field-input" placeholder="Street address & house number">
+      <input type="tel" id="custPhone" class="field-input" placeholder="Phone number">
+    </div>
+    <div class="header-grid single">
+      <input type="text" id="custCityStateZip" class="field-input" placeholder="City, State ZIP">
+    </div>
+    <div class="header-gap"></div>
+
+    <div class="toolbar">
+      <label class="font-field">Font
+        <select id="fontChoice" onchange="updateEstimateStyle()">
+          <option value="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" selected>System (Default)</option>
+          <option value="Helvetica, sans-serif">Helvetica</option>
+          <option value="'Helvetica Neue', Helvetica, sans-serif">Helvetica Neue</option>
+          <option value="Arial, sans-serif">Arial</option>
+          <option value="'Arial Rounded MT Bold', Arial, sans-serif">Arial Rounded</option>
+          <option value="'Times New Roman', Times, serif">Times New Roman</option>
+          <option value="Georgia, serif">Georgia</option>
+          <option value="Verdana, Geneva, sans-serif">Verdana</option>
+          <option value="'Courier New', Courier, monospace">Courier New</option>
+          <option value="'Trebuchet MS', sans-serif">Trebuchet MS</option>
+          <option value="Palatino, 'Palatino Linotype', serif">Palatino</option>
+          <option value="Baskerville, serif">Baskerville</option>
+          <option value="Didot, serif">Didot</option>
+          <option value="Futura, sans-serif">Futura</option>
+          <option value="Optima, sans-serif">Optima</option>
+          <option value="'Gill Sans', 'Gill Sans MT', sans-serif">Gill Sans</option>
+          <option value="'American Typewriter', serif">American Typewriter</option>
+          <option value="Copperplate, sans-serif">Copperplate</option>
+          <option value="Impact, sans-serif">Impact</option>
+          <option value="Avenir, 'Avenir Next', sans-serif">Avenir</option>
+        </select>
+      </label>
+      <label class="size-field">Size
+        <input type="number" id="sizeChoice" min="2" max="98" step="1" value="16" oninput="updateEstimateStyle()">
+      </label>
+    </div>
+
+    <textarea id="estimateText" placeholder="Job description, trip charges, notes..."></textarea>
+
+    <!-- Print-only mirror of everything above, laid out the same way -->
+    <div id="printView">
+      <div class="print-row">
+        <div class="print-cell" id="pv-name"></div>
+        <div class="print-cell" id="pv-email"></div>
+      </div>
+      <div class="print-row">
+        <div class="print-cell" id="pv-street"></div>
+        <div class="print-cell" id="pv-phone"></div>
+      </div>
+      <div class="print-row single">
+        <div class="print-cell" id="pv-citystatezip"></div>
+      </div>
+      <div class="print-gap"></div>
+      <pre id="pv-job"></pre>
+      <div class="print-footer" id="pv-timestamp"></div>
+    </div>
+
+    <div class="actions">
+      <button onclick="printEstimate()">Print</button>
+      <button onclick="saveEstimate()" id="saveBtn">Save</button>
+    </div>
+    <button class="history-toggle" onclick="toggleHistory()" id="historyToggle">View past estimates</button>
+    <div class="history-panel" id="historyPanel">
+      <ul id="historyList" style="list-style:none; margin:0; padding:0;"></ul>
+    </div>
+  </div>
+
+  <script>
+    var STORAGE_KEY = 'estimatePadHistory';
+
+    // ---- Eastern time, always — regardless of the device's own timezone setting ----
+    // Automatically shows EST in winter and EDT in summer, which is correct.
+    function easternTimestamp(date) {
+      return new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: 'numeric', day: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+        timeZoneName: 'short'
+      }).format(date);
+    }
+
+    // ---- Keep the size box inside 2-98 no matter what gets typed into it ----
+    function clampSize(el) {
+      var v = parseInt(el.value, 10);
+      if (isNaN(v)) { v = 16; }
+      if (v < 2) { v = 2; }
+      if (v > 98) { v = 98; }
+      el.value = v;
+      return v;
+    }
+
+    function updateEstimateStyle() {
+      var font = document.getElementById('fontChoice').value;
+      var size = clampSize(document.getElementById('sizeChoice')) + 'px';
+      var fields = ['custName', 'custEmail', 'custStreet', 'custPhone',
+                     'custCityStateZip', 'estimateText'];
+      fields.forEach(function (id) {
+        var el = document.getElementById(id);
+        el.style.fontFamily = font;
+        el.style.fontSize = size;
+      });
+    }
+
+    // ---- Right-arrow-to-next-field, only when the cursor is already at the end ----
+    function advanceOnRightArrow(fromEl, toEl) {
+      fromEl.addEventListener('keydown', function (e) {
+        var atEnd = fromEl.selectionStart === fromEl.value.length &&
+                    fromEl.selectionEnd === fromEl.value.length;
+        if (e.key === 'ArrowRight' && atEnd) {
+          e.preventDefault();
+          toEl.focus();
+          var len = toEl.value.length;
+          if (typeof toEl.setSelectionRange === 'function') {
+            toEl.setSelectionRange(len, len);
+          }
+        }
+      });
+    }
+
+    // ---- Email field: typing/dictating the word "at" becomes "@" ----
+    function setupEmailAtSymbol(el) {
+      el.addEventListener('input', function () {
+        var before = el.value;
+        var after = before.replace(/\bat\b/gi, '@');
+        if (after !== before) {
+          el.value = after;
+          var len = el.value.length;
+          el.setSelectionRange(len, len);
+        }
+      });
+    }
+
+    // ---- Phone field: digits get dashed as XXX-XXX-XXXX automatically ----
+    function setupPhoneDashes(el) {
+      el.addEventListener('input', function () {
+        var digits = el.value.replace(/\D/g, '').slice(0, 10);
+        var formatted = digits;
+        if (digits.length > 6) {
+          formatted = digits.slice(0, 3) + '-' + digits.slice(3, 6) + '-' + digits.slice(6);
+        } else if (digits.length > 3) {
+          formatted = digits.slice(0, 3) + '-' + digits.slice(3);
+        }
+        el.value = formatted;
+      });
+    }
+
+    function printEstimate() {
+      var font = document.getElementById('fontChoice').value;
+      var size = clampSize(document.getElementById('sizeChoice')) + 'px';
+
+      document.getElementById('pv-name').textContent = document.getElementById('custName').value;
+      document.getElementById('pv-email').textContent = document.getElementById('custEmail').value;
+      document.getElementById('pv-street').textContent = document.getElementById('custStreet').value;
+      document.getElementById('pv-phone').textContent = document.getElementById('custPhone').value;
+      document.getElementById('pv-citystatezip').textContent = document.getElementById('custCityStateZip').value;
+      document.getElementById('pv-job').textContent = document.getElementById('estimateText').value;
+      document.getElementById('pv-timestamp').textContent = 'Printed ' + easternTimestamp(new Date());
+
+      var printView = document.getElementById('printView');
+      printView.style.fontFamily = font;
+      printView.style.fontSize = size;
+
+      window.print();
+    }
+
+    function loadHistory() {
+      try {
+        var raw = localStorage.getItem(STORAGE_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveHistoryArray(list) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+      } catch (e) {
+        alert('Could not save. Your device storage may be full.');
+      }
+    }
+
+    function saveEstimate() {
+      var job = document.getElementById('estimateText').value;
+      var name = document.getElementById('custName').value;
+      var email = document.getElementById('custEmail').value;
+      var street = document.getElementById('custStreet').value;
+      var phone = document.getElementById('custPhone').value;
+      var cityStateZip = document.getElementById('custCityStateZip').value;
+
+      var hasContent = [job, name, email, street, phone, cityStateZip].some(
+        function (v) { return v && v.trim(); }
+      );
+      if (!hasContent) { return; }
+
+      var history = loadHistory();
+      history.unshift({
+        id: Date.now(),
+        when: easternTimestamp(new Date()),
+        name: name,
+        email: email,
+        street: street,
+        phone: phone,
+        cityStateZip: cityStateZip,
+        job: job,
+        font: document.getElementById('fontChoice').value,
+        size: document.getElementById('sizeChoice').value
+      });
+      saveHistoryArray(history);
+      renderHistory();
+
+      var btn = document.getElementById('saveBtn');
+      var original = btn.textContent;
+      btn.textContent = 'Saved \u2713';
+      setTimeout(function () { btn.textContent = original; }, 1200);
+    }
+
+    function renderHistory() {
+      var history = loadHistory();
+      document.getElementById('historyToggle').textContent =
+        'View past estimates (' + history.length + ')';
+
+      var list = document.getElementById('historyList');
+      list.innerHTML = '';
+
+      if (history.length === 0) {
+        list.innerHTML = '<li class="history-empty">Nothing saved yet.</li>';
+        return;
+      }
+
+      history.forEach(function (entry) {
+        var li = document.createElement('li');
+        li.className = 'history-item';
+
+        var label = (entry.name && entry.name.trim()) ? entry.name : '(no name)';
+        var jobPreview = (entry.job || '').slice(0, 40).replace(/\n/g, ' ');
+
+        var loadBtn = document.createElement('button');
+        loadBtn.className = 'load-btn';
+        loadBtn.onclick = function () { loadEstimate(entry.id); };
+        var whenSpan = document.createElement('span');
+        whenSpan.className = 'when';
+        whenSpan.textContent = entry.when;
+        loadBtn.appendChild(whenSpan);
+        loadBtn.appendChild(document.createTextNode(label + (jobPreview ? ' — ' + jobPreview : '')));
+
+        var delBtn = document.createElement('button');
+        delBtn.className = 'delete-btn';
+        delBtn.textContent = '\u2715';
+        delBtn.onclick = function () { deleteEstimate(entry.id); };
+
+        li.appendChild(loadBtn);
+        li.appendChild(delBtn);
+        list.appendChild(li);
+      });
+    }
+
+    function loadEstimate(id) {
+      var entry = loadHistory().find(function (e) { return e.id === id; });
+      if (!entry) { return; }
+      document.getElementById('custName').value = entry.name || '';
+      document.getElementById('custEmail').value = entry.email || '';
+      document.getElementById('custStreet').value = entry.street || '';
+      document.getElementById('custPhone').value = entry.phone || '';
+      document.getElementById('custCityStateZip').value = entry.cityStateZip || '';
+      document.getElementById('estimateText').value = entry.job || '';
+      document.getElementById('fontChoice').value = entry.font;
+      document.getElementById('sizeChoice').value = parseInt(entry.size, 10) || 16;
+      updateEstimateStyle();
+      document.getElementById('historyPanel').classList.remove('open');
+    }
+
+    function deleteEstimate(id) {
+      var history = loadHistory().filter(function (e) { return e.id !== id; });
+      saveHistoryArray(history);
+      renderHistory();
+    }
+
+    function toggleHistory() {
+      document.getElementById('historyPanel').classList.toggle('open');
+    }
+
+    // ---- Wire up the field-to-field navigation and the auto-formatting ----
+    var elName = document.getElementById('custName');
+    var elEmail = document.getElementById('custEmail');
+    var elStreet = document.getElementById('custStreet');
+    var elPhone = document.getElementById('custPhone');
+    var elCityStateZip = document.getElementById('custCityStateZip');
+    var elJob = document.getElementById('estimateText');
+
+    advanceOnRightArrow(elName, elEmail);
+    advanceOnRightArrow(elEmail, elStreet);
+    advanceOnRightArrow(elStreet, elPhone);
+    advanceOnRightArrow(elPhone, elCityStateZip);
+    advanceOnRightArrow(elCityStateZip, elJob);
+
+    setupEmailAtSymbol(elEmail);
+    setupPhoneDashes(elPhone);
+
+    renderHistory();
+    updateEstimateStyle();
+  </script>
+</body>
+</html>
