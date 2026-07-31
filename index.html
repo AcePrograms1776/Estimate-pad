@@ -206,12 +206,13 @@
   .print-timestamp { font-size: 10pt; color: #444; }
 
   @media print {
+    @page { margin: 0; }
     body { background: #fff; padding: 0; }
     h1, .toolbar, .actions, .history-toggle, .history-panel,
-    .header-grid, .header-gap { display: none; }
+    .header-grid, .header-gap, textarea { display: none; }
     .sheet { box-shadow: none; padding: 0; max-width: 100%; background: #fff; }
-    #printView { display: block; position: relative; min-height: 90vh; }
-    .print-footer { position: fixed; bottom: 0; left: 0; }
+    #printView { display: block; position: relative; min-height: 90vh; padding: 0.4in; }
+    .print-footer { position: fixed; bottom: 0.2in; right: 0.2in; }
   }
 </style>
 </head>
@@ -379,8 +380,8 @@
       });
     }
 
-    // ---- Name field: capitalize the first letter of each word (first & last name) ----
-    function setupNameCapitalization(el) {
+    // ---- Capitalize the first letter of every word (name, street name) ----
+    function setupWordCapitalization(el) {
       el.addEventListener('input', function () {
         var pos = el.selectionStart;
         var before = el.value;
@@ -394,8 +395,8 @@
       });
     }
 
-    // ---- Email field: capitalize just the very first letter typed ----
-    function setupEmailCapitalization(el) {
+    // ---- Capitalize just the very first letter typed (email, city) ----
+    function setupCapitalizeFirstLetter(el) {
       el.addEventListener('input', function () {
         var pos = el.selectionStart;
         var before = el.value;
@@ -692,9 +693,11 @@
     advanceOnRightArrow(elPhone, elCityStateZip);
     advanceOnRightArrow(elCityStateZip, elJob);
 
-    setupNameCapitalization(elName);
+    setupWordCapitalization(elName);
+    setupWordCapitalization(elStreet);
     setupEmailAtSymbol(elEmail);
-    setupEmailCapitalization(elEmail);
+    setupCapitalizeFirstLetter(elEmail);
+    setupCapitalizeFirstLetter(elCityStateZip);
     setupForcedCaps(elStreet);
     setupForcedCaps(elCityStateZip);
     setupCityStateZipFormat(elCityStateZip);
