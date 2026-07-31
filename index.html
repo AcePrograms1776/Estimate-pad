@@ -301,7 +301,6 @@
     </div>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script>
     var STORAGE_KEY = 'estimatePadHistory';
@@ -518,62 +517,102 @@
       printView.style.fontSize = size;
     }
 
-    // Builds a clean PDF of the estimate. Because this is a real PDF and not a
-    // web page, it has NO browser-added date, URL, or page number on it.
-    async function buildPdfBlob() {
-      fillPrintView();
-      var printView = document.getElementById('printView');
-
-      // Temporarily reveal it off-screen so it can be captured as an image
-      printView.style.display = 'block';
-      printView.style.position = 'fixed';
-      printView.style.left = '-9999px';
-      printView.style.top = '0';
-      printView.style.width = '700px';
-      printView.style.background = '#fff';
-      printView.style.padding = '48px';
-
-      try {
-        var canvas = await html2canvas(printView, { backgroundColor: '#ffffff', scale: 2 });
-
-        var jsPDFCtor = window.jspdf.jsPDF;
-        var pdf = new jsPDFCtor({ unit: 'pt', format: 'letter' });
-        var pageWidth = pdf.internal.pageSize.getWidth();
-        var pageHeight = pdf.internal.pageSize.getHeight();
-        var imgWidth = pageWidth;
-        var pxPageHeight = Math.floor((canvas.width / imgWidth) * pageHeight);
-
-        var renderedHeight = 0;
-        var pageNum = 0;
-        while (renderedHeight < canvas.height) {
-          if (pageNum > 0) { pdf.addPage(); }
-          var sliceHeight = Math.min(pxPageHeight, canvas.height - renderedHeight);
-
-          var sliceCanvas = document.createElement('canvas');
-          sliceCanvas.width = canvas.width;
-          sliceCanvas.height = sliceHeight;
-          sliceCanvas.getContext('2d').drawImage(
-            canvas, 0, renderedHeight, canvas.width, sliceHeight,
-            0, 0, canvas.width, sliceHeight
-          );
-
-          var sliceImgHeightPt = (sliceHeight * imgWidth) / canvas.width;
-          pdf.addImage(sliceCanvas.toDataURL('image/png'), 'PNG', 0, 0, imgWidth, sliceImgHeightPt);
-
-          renderedHeight += sliceHeight;
-          pageNum++;
-        }
-
-        return pdf.output('blob');
-      } finally {
-        printView.style.display = '';
-        printView.style.position = '';
-        printView.style.left = '';
-        printView.style.top = '';
-        printView.style.width = '';
-        printView.style.background = '';
-        printView.style.padding = '';
+    // Maps your chosen screen font to the closest font built into PDFs.
+    // PDFs only guarantee three: a plain one, a serif one, and a typewriter one.
+    function pdfFontFor(cssFont) {
+      var f = (cssFont || '').toLowerCase();
+      if (f.indexOf('courier') !== -1 || f.indexOf('monospace') !== -1) {
+        return 'courier';
       }
+      var serifs = ['times', 'georgia', 'palatino', 'baskerville', 'didot',
+                    'american typewriter'];
+      for (var i = 0; i < serifs.length; i++) {
+        if (f.indexOf(serifs[i]) !== -1) { return 'times'; }
+      }
+      return 'helvetica';
+    }
+
+    // Builds the PDF by WRITING REAL TEXT into it — not by photographing the
+    // screen. That keeps the words selectable, copyable and searchable, makes
+    // the file much smaller, and keeps it sharp at any zoom.
+    async function buildPdfBlob() {
+      if (!window.jspdf) {
+        throw new Error('the PDF tool did not load — check your internet connection');
+      }
+      tidyAllFields();
+
+      var jsPDFCtor = window.jspdf.jsPDF;
+      var pdf = new jsPDFCtor({ unit: 'pt', format: 'letter' });
+
+      var pageW = pdf.internal.pageSize.getWidth();
+      var pageH = pdf.internal.pageSize.getHeight();
+      var margin = 54;                       // 0.75 inch all round
+      var contentW = pageW - margin * 2;
+      var gutter = 18;
+      var colW = (contentW - gutter) / 2;
+      var rightX = margin + colW + gutter;
+
+      // Screen sizes are in pixels; PDFs use points (72 to the inch).
+      var sizePt = Math.max(4, Math.round(
+        clampSize(document.getElementById('sizeChoice')) * 0.75
+      ));
+      var lineH = sizePt * 1.45;
+
+      pdf.setFont(pdfFontFor(document.getElementById('fontChoice').value), 'normal');
+      pdf.setFontSize(sizePt);
+
+      var y = margin + sizePt;
+
+      function newPageIfNeeded() {
+        if (y > pageH - margin) {
+          pdf.addPage();
+          y = margin + sizePt;
+        }
+      }
+
+      // ---- Letterhead: two columns per row ----
+      function letterheadRow(leftText, rightText) {
+        var l = leftText ? pdf.splitTextToSize(leftText, colW) : [];
+        var r = rightText ? pdf.splitTextToSize(rightText, colW) : [];
+        var rows = Math.max(l.length, r.length);
+        if (rows === 0) { return; }
+
+        newPageIfNeeded();
+        if (l.length) { pdf.text(l, margin, y); }
+        if (r.length) { pdf.text(r, rightX, y); }
+        y += rows * lineH;
+      }
+
+      letterheadRow(
+        document.getElementById('custName').value,
+        document.getElementById('custEmail').value
+      );
+      letterheadRow(
+        document.getElementById('custStreet').value,
+        document.getElementById('custPhone').value
+      );
+      letterheadRow(
+        document.getElementById('custCityStateZip').value,
+        ''
+      );
+
+      // ---- Blank line, then the job description ----
+      y += lineH;
+
+      var job = document.getElementById('estimateText').value || '';
+      job.split('\n').forEach(function (rawLine) {
+        if (rawLine.trim() === '') {
+          y += lineH;                        // preserve blank lines
+          return;
+        }
+        pdf.splitTextToSize(rawLine, contentW).forEach(function (line) {
+          newPageIfNeeded();
+          pdf.text(line, margin, y);
+          y += lineH;
+        });
+      });
+
+      return pdf.output('blob');
     }
 
     // =========================================================================
@@ -656,8 +695,8 @@
     }
 
     async function buildEstimateFile() {
-      if (!window.html2canvas || !window.jspdf) {
-        throw new Error('the PDF tools did not load — check your internet connection');
+      if (!window.jspdf) {
+        throw new Error('the PDF tool did not load — check your internet connection');
       }
       var blob = await buildPdfBlob();
       return new File([blob], estimateFileName(), { type: 'application/pdf' });
