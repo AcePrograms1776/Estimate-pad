@@ -285,7 +285,7 @@
     </div>
 
     <div class="actions">
-      <button onclick="printEstimate()">Print</button>
+      <button onclick="printEstimate()" id="printBtn">Print</button>
       <button onclick="saveEstimate()" id="saveBtn">Save</button>
       <button onclick="emailEstimate()" id="emailBtn">Email</button>
     </div>
@@ -518,23 +518,10 @@
       printView.style.fontSize = size;
     }
 
-    function printEstimate() {
+    // Builds a clean PDF of the estimate. Because this is a real PDF and not a
+    // web page, it has NO browser-added date, URL, or page number on it.
+    async function buildPdfBlob() {
       fillPrintView();
-      window.print();
-    }
-
-    async function emailEstimate() {
-      var btn = document.getElementById('emailBtn');
-      var originalLabel = btn.textContent;
-
-      if (!window.html2canvas || !window.jspdf) {
-        alert('The PDF tools did not load — check your internet connection and try again.');
-        return;
-      }
-
-      btn.textContent = 'Preparing…';
-      fillPrintView();
-
       var printView = document.getElementById('printView');
 
       // Temporarily reveal it off-screen so it can be captured as an image
@@ -544,7 +531,7 @@
       printView.style.top = '0';
       printView.style.width = '700px';
       printView.style.background = '#fff';
-      printView.style.padding = '24px';
+      printView.style.padding = '48px';
 
       try {
         var canvas = await html2canvas(printView, { backgroundColor: '#ffffff', scale: 2 });
@@ -577,9 +564,76 @@
           pageNum++;
         }
 
-        var pdfBlob = pdf.output('blob');
-        var namePart = (document.getElementById('custName').value || 'estimate').trim().replace(/\s+/g, '_');
-        var fileName = namePart + '.pdf';
+        return pdf.output('blob');
+      } finally {
+        printView.style.display = '';
+        printView.style.position = '';
+        printView.style.left = '';
+        printView.style.top = '';
+        printView.style.width = '';
+        printView.style.background = '';
+        printView.style.padding = '';
+      }
+    }
+
+    function estimateFileName() {
+      var namePart = (document.getElementById('custName').value || 'estimate')
+        .trim().replace(/\s+/g, '_');
+      return namePart + '.pdf';
+    }
+
+    // PRINT — goes through a PDF instead of printing the web page directly.
+    // Printing a web page makes the browser stamp its own date/URL/page number
+    // on your paper. Printing a PDF does not.
+    async function printEstimate() {
+      var btn = document.getElementById('printBtn');
+      var originalLabel = btn.textContent;
+
+      if (!window.html2canvas || !window.jspdf) {
+        // No internet for the PDF tools — fall back to plain printing.
+        fillPrintView();
+        window.print();
+        return;
+      }
+
+      btn.textContent = 'Preparing…';
+
+      try {
+        var pdfBlob = await buildPdfBlob();
+        var fileName = estimateFileName();
+        var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          // On iPhone/iPad this opens the share sheet — tap Print there.
+          await navigator.share({ files: [file], title: 'Estimate' });
+        } else {
+          // On a computer this opens the PDF in its own tab — print from there.
+          var url = URL.createObjectURL(pdfBlob);
+          window.open(url, '_blank');
+        }
+      } catch (err) {
+        if (err && err.name !== 'AbortError') {
+          alert('Something went wrong creating the PDF. Please try again.');
+        }
+      } finally {
+        btn.textContent = originalLabel;
+      }
+    }
+
+    async function emailEstimate() {
+      var btn = document.getElementById('emailBtn');
+      var originalLabel = btn.textContent;
+
+      if (!window.html2canvas || !window.jspdf) {
+        alert('The PDF tools did not load — check your internet connection and try again.');
+        return;
+      }
+
+      btn.textContent = 'Preparing…';
+
+      try {
+        var pdfBlob = await buildPdfBlob();
+        var fileName = estimateFileName();
         var file = new File([pdfBlob], fileName, { type: 'application/pdf' });
 
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -597,13 +651,6 @@
           alert('Something went wrong creating the PDF. Please try again.');
         }
       } finally {
-        printView.style.display = '';
-        printView.style.position = '';
-        printView.style.left = '';
-        printView.style.top = '';
-        printView.style.width = '';
-        printView.style.background = '';
-        printView.style.padding = '';
         btn.textContent = originalLabel;
       }
     }
